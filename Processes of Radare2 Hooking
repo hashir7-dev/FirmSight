@@ -1,0 +1,162 @@
+Week 2 — r2pipe Hooking (with a stand-in process for now)
+
+Step 1 — Install Radare2:
+
+bash
+sudo apt update
+sudo apt install -y radare2
+
+Verify it installed:
+
+bash
+r2 -v
+
+Step 2 — Install r2pipe (Radare2's Python API), inside your venv:
+
+bash
+source firmsight-env/bin/activate
+pip install r2pipe
+
+Step 3 — Create a simple long-running "stand-in" process to attach to (this represents where your real emulated firmware process will run later — for now, just something alive long enough to inspect):
+
+bash
+nano dummy_process.c
+
+Compile and run it in the background:
+
+bash
+gcc -o dummy_process dummy_process.c
+./dummy_process &
+
+Note the PID it prints when backgrounded (or run pgrep dummy_process to find it).
+
+Step 4 — Write the r2pipe script that attaches to it and dumps memory maps:
+
+bash
+nano r2_hook.py
+
+Step 5 — Run it (needs sudo since attaching to another process requires ptrace permissions):
+
+bash
+sudo python3 r2_hook.py
+
+Good — Radare2 installed cleanly (version 6.0.7). Now let's continue with the rest of Week 2.
+
+Step 2 — Install r2pipe inside your venv:
+
+bash
+source firmsight-env/bin/activate
+pip install r2pipe
+
+Step 3 — Create the dummy process:
+
+bash
+nano dummy_process.c
+
+Compile and run it in the background:
+
+bash
+gcc -o dummy_process dummy_process.c
+./dummy_process &
+
+Step 4 — Create the r2pipe hook script:
+
+bash
+nano r2_hook.py
+
+Step 5 — Run it:
+
+bash
+sudo python3 r2_hook.py
+
+Option 1 — Just bootstrap pip into the existing venv:
+
+bash
+python3 -m ensurepip --upgrade
+
+Then retry:
+
+bash
+pip install r2pipe
+
+Option 2 — If that doesn't work, recreate the venv cleanly:
+
+bash
+deactivate
+rm -rf firmsight-env
+python3 -m venv firmsight-env
+source firmsight-env/bin/activate
+python3 -m pip install --upgrade pip
+pip install textual textual-dev r2pipe
+
+(Option 2 also reinstalls textual/textual-dev since recreating the venv wipes everything — worth doing anyway to confirm pip itself is healthy.)
+
+
+r2pipe installed cleanly. Now let's set up the dummy process and the hook script.
+
+Step 3 — Create the dummy process:
+
+bash
+nano dummy_process.c
+
+Compile and run it in the background:
+
+bash
+gcc -o dummy_process dummy_process.c
+./dummy_process &
+
+You should see something like [1] 12345 printed (that's the background job number and PID) and then "Dummy process running... tick 0" start appearing.
+
+Step 4 — Create the r2pipe hook script:
+
+bash
+nano r2_hook.py
+
+Step 5 — Run it:
+
+bash
+sudo python3 r2_hook.py
+
+Note: since you're inside a venv but running with sudo, sudo might use the system Python instead of your venv's Python (losing access to r2pipe). If Step 5 gives a ModuleNotFoundError: No module named 'r2pipe', run this instead, using the venv's own Python directly:
+
+bash
+sudo firmsight-env/bin/python3 r2_hook.py
+
+Run through Steps 3–5 and paste me what you see — especially the memory map output from Step 5 (or whichever error shows up, including the sudo/venv one if it happens).
+
+----------------------------------------------------------------------------------
+
+This is the same type of issue as the r2pipe install earlier — textual likely isn't actually installed in this venv (possibly from when pip itself was broken earlier, before you ran ensurepip). Let's just reinstall both to be safe.
+
+Step 1 — Confirm what's actually installed in this venv:
+
+bash
+pip list
+
+Check if textual and r2pipe both appear in the list.
+
+Step 2 — Install/reinstall both, just to be sure:
+
+bash
+pip install textual textual-dev r2pipe
+
+Step 3 — Retry running the app:
+
+bash
+sudo firmsight-env/bin/python3 firmsight_tui.py
+
+Paste me the output of Step 1 (the pip list) and Step 3 — that'll confirm whether this was a one-time gap from the earlier broken-pip incident, or something else going on.
+
+Let's confirm precisely against the brief's wording for Track 2:
+
+✅ Week 1 — "TUI Scaffolding"
+
+"Initialize a Textual (Terminal UI) application with panes for 'Filesystem Tree', 'Network Logs', and 'Emulation Status'."
+
+Done: All three panes exist, render correctly, app runs cleanly.
+
+✅ Week 2 — "Radare2 Hooking"
+
+"Use r2pipe (Python) to attach to the running emulated process, dumping its active memory maps to the Terminal UI."
+
+Done: r2pipe attaches to a live process (dummy_process, standing in for the real emulated firmware process), and its memory maps are dumped live into the Terminal UI, auto-refreshing every 3 seconds — not just a one-time terminal print.  
