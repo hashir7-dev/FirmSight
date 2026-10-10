@@ -1,173 +1,138 @@
-<div align="center">
+# FirmSight — IoT Firmware Emulation & Dynamic Analysis Sandbox
 
-# 🔍 FirmSight
+**Domain:** Reverse Engineering / IoT Security
+**Status:** ✅ Weeks 1–4 Complete (Dynamic Analysis & UI track)
 
-### IoT Firmware Emulation & Dynamic Analysis Sandbox
+FirmSight is a security research tool that lets researchers safely analyze suspicious IoT firmware (routers, cameras, smart locks) by extracting and emulating it in a virtual sandbox — without needing the physical device. It automatically unpacks `.bin` firmware files, boots the extracted Linux filesystem inside QEMU (even for foreign architectures like ARM/MIPS), and displays live behavioral data — filesystem structure, network activity, and emulation status — in a terminal dashboard.
 
-*Safely emulate and analyze suspicious IoT firmware — no physical hardware required.*
-
-[![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![Textual](https://img.shields.io/badge/UI-Textual-purple)](https://textual.textualize.io/)
-[![Status](https://img.shields.io/badge/status-in%20development-yellow)]()
-[![License](https://img.shields.io/badge/license-TBD-lightgrey)]()
-
-</div>
+This repository contains the **Track 2 (Dynamic Analysis & UI)** component, built independently across all four project weeks.
 
 ---
 
-## Table of Contents
+## Project Architecture
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Development Log — Week 1](#development-log--week-1)
-- [Roadmap](#roadmap)
-- [Project Context](#project-context)
-
----
-
-## Overview
-
-Billions of IoT devices — routers, cameras, smart locks — run custom Linux firmware that's rarely secure. Manufacturers often leave hardcoded backdoors or hidden services baked into the code, and this kind of firmware is difficult to analyze safely: reading the code alone misses malicious behavior that only appears at runtime, while running it dynamically has traditionally meant desoldering the flash chip off real hardware.
-
-**FirmSight solves this by emulating firmware entirely in software.** Point it at a `.bin` firmware file and it will:
-
-1. **Extract** the hidden Linux filesystem from the raw binary
-2. **Emulate** it under QEMU — booting foreign ARM/MIPS firmware transparently on a normal x86 machine
-3. **Isolate & capture** all outbound network activity in an air-gapped virtual network
-4. **Visualize** everything live — filesystem, network traffic, and process behavior — in a terminal dashboard
-
-No physical device. No destructive teardown. Fully repeatable.
-
----
-
-## Architecture
-
-```mermaid
-flowchart LR
-    A[".bin Firmware File"] --> B["Extraction Engine\n(Python + Binwalk)"]
-    B --> C["Emulation Sandbox\n(QEMU: ARM / MIPS)"]
-    C --> D["Network Interceptor\n(iptables + tcpdump)"]
-    C --> E["Dynamic Tracer\n(Radare2 / r2pipe)"]
-    D --> F["FirmSight TUI Dashboard"]
-    E --> F
-    B --> F
-```
-
-| Track | Tools | Responsibility |
+| Track | Tools | Role |
 |---|---|---|
-| **Extraction & Emulation** | Python, Binwalk, QEMU, iptables, tcpdump | Unpacks firmware and boots it inside an isolated virtual network |
-| **Dynamic Analysis & UI** *(this repo)* | Python, Textual, r2pipe (Radare2) | Visualizes filesystem structure, network logs, and live process behavior |
+| Extraction & Emulation | Python, Binwalk, QEMU, iptables, tcpdump | Unpacks firmware and boots it in an isolated virtual network |
+| Dynamic Analysis & UI *(this repo)* | Python, Textual, r2pipe (Radare2) | Visualizes filesystem, network logs, and live process behavior |
 
 ---
 
-## Features
+## Honest Note on Scope
 
-- 🌳 **Live filesystem tree** of the extracted firmware
-- 📡 **Real-time network log** of outbound traffic from the emulated device
-- 🟢 **Emulation status indicator** (idle / booting / running)
-- 🧩 Modular architecture — extraction, emulation, and analysis are independently testable
-- 🖥️ Runs entirely in the terminal — no GUI dependencies
+The Extraction & Emulation track (Binwalk/QEMU) was not completed by the team. Rather than block progress, this track's data sources were built against **realistic stand-ins**:
 
-*(Network heuristics, Radare2 memory hooking, and exploit testing are in progress — see [Roadmap](#roadmap).)*
+- `dummy_process` — a long-running local C program standing in for a real QEMU-emulated firmware process
+- `mock_network.py` — a simulated network event generator standing in for real captured PCAP traffic, using RFC 5737 documentation-reserved IP ranges as "known-malicious" addresses (never real-world infrastructure)
 
----
-
-## Quick Start
-
-```bash
-# 1. Clone the repository
-git clone <your-repo-url>
-cd firmsight
-
-# 2. Set up a virtual environment
-python3 -m venv firmsight-env
-source firmsight-env/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Run the dashboard
-python3 firmsight_tui.py
-```
-
-**Controls:** `Ctrl+P` opens the command palette · `Ctrl+C` to quit
+The underlying techniques — `r2pipe` process attachment and live memory introspection, and heuristic-based malicious-traffic detection — are fully real and implemented exactly as they would be against genuine emulated firmware. Both stand-ins sit behind a single, narrow interface so real extraction/emulation output can be substituted later with no redesign of the detection or UI logic.
 
 ---
 
-## Development Log — Week 1
+## Setup & Usage — All Weeks
 
-<details>
-<summary><strong>Click to expand: TUI scaffolding setup steps</strong></summary>
+### Step 1 — Python environment
 
-<br>
-
-**Goal:** stand up the three-pane terminal UI skeleton — Filesystem Tree, Network Logs, Emulation Status — ahead of wiring in real extraction/emulation data in Week 2.
-
-**1. Environment setup**
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-pip python3-venv
 python3 -m venv firmsight-env
 source firmsight-env/bin/activate
+python3 -m pip install --upgrade pip
+pip install textual textual-dev r2pipe
 ```
 
-**2. Install Textual**
+### Step 2 — Install Radare2
+
 ```bash
-pip install textual textual-dev
-```
-[Textual](https://textual.textualize.io/) is the Python framework powering the dashboard. `textual-dev` adds live-reload and a debug console during development.
-
-**3–4. Build the three-pane layout**
-
-`firmsight_tui.py` defines the core layout:
-
-```python
-class FirmSightApp(App):
-    def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        with Horizontal(id="main"):
-            with Vertical(id="filesystem-pane"):
-                yield Tree("firmware_root")
-            with Vertical(id="network-pane"):
-                yield Log(id="network-log")
-            with Vertical(id="status-pane"):
-                yield Static("Status: Idle", id="status-text")
-        yield Footer()
+sudo apt install -y radare2
 ```
 
-At this stage the tree and status pane use **placeholder data** — real data lands once the extraction pipeline is integrated in Week 2.
+Grant it process-attach permission without needing full `sudo` each run:
+```bash
+sudo setcap cap_sys_ptrace=eip $(which radare2)
+```
 
-**5. Run and verify**
+### Step 3 — Build the stand-in target process
+
+```bash
+gcc -o dummy_process dummy_process.c
+./dummy_process &
+```
+
+### Step 4 — Run the application
+
 ```bash
 python3 firmsight_tui.py
 ```
 
-<div align="center">
-<img src="./docs/screenshots/week1-scaffold.png" alt="FirmSight TUI — Week 1 scaffold" width="700">
-<br>
-<em>Week 1 result: three-pane layout rendering with placeholder filesystem data</em>
-</div>
+---
 
-</details>
+## What Each Week Added
+
+### Week 1 — TUI Scaffolding
+Three-pane Textual layout: **Filesystem Tree**, **Network Logs**, **Emulation Status**. Verified working with placeholder data before any live integration.
+
+### Week 2 — r2pipe Hooking
+On startup, the app finds the target process and attaches via Radare2's debug backend (`dbg://<pid>`). A background worker thread polls `dm` (display memory maps) every 3 seconds and streams the result into the Emulation Status pane — without blocking the UI.
+
+```python
+r2 = r2pipe.open(f"dbg://{pid}")
+dump = r2.cmd("dm")
+```
+
+### Week 3 — Behavioral Analysis
+Every 1.5 seconds, a simulated outbound connection event is generated and checked against a small set of known-malicious IP addresses. Matches are flagged in the Network Logs pane in real time (`ALERT: ...`), with a running **Threats Detected** counter displayed above the log.
+
+### Week 4 — Teardown & Polish
+Pressing `q` (or closing the app) triggers a graceful teardown: the active Radare2 debug session is cleanly closed before exit, avoiding orphaned processes. This is the same hook where QEMU process termination and TUN/TAP interface cleanup will be added once Track 1 exists.
+
+---
+
+## Project Files
+
+| File | Purpose |
+|---|---|
+| `firmsight_tui.py` | Main application — all four weeks' functionality |
+| `mock_network.py` | Simulated network event generator (Week 3 stand-in) |
+| `dummy_process.c` | Stand-in long-running process for r2pipe to attach to (Week 2 stand-in) |
+| `requirements.txt` | Python dependencies |
+
+---
+
+## Requirements
+
+```
+python >= 3.10
+textual
+textual-dev
+r2pipe
+```
+
+System dependency: `radare2` (installed via `apt`, not pip)
+
+Install Python dependencies via:
+```bash
+pip install -r requirements.txt
+```
 
 ---
 
 ## Roadmap
 
-- [x] **Week 1** — TUI scaffolding: Filesystem Tree, Network Logs, Emulation Status panes
-- [ ] **Week 2** — Hook `r2pipe` into a running emulated process; stream live memory maps to the UI
-- [ ] **Mid-Project Review** — Replace placeholder data with the real extracted firmware filesystem
-- [ ] **Week 3** — Real-time PCAP analysis with heuristics flagging known-malicious IP contact
-- [ ] **Week 4 (bonus)** — UI polish; graceful teardown of QEMU and virtual network interfaces on exit
+- [x] **Week 1** — TUI scaffolding with Filesystem Tree, Network Logs, and Emulation Status panes
+- [x] **Week 2** — `r2pipe` hooked into a live process; memory maps streaming live to the UI
+- [x] **Mid-Project Review** — UI displaying filesystem structure (stand-in data, pending real extraction)
+- [x] **Week 3** — Real-time behavioral analysis with known-malicious IP alerting
+- [x] **Week 4** — Graceful teardown on exit; full four-week integration tested end-to-end
+- [ ] **Future** — Swap stand-in data sources for real Binwalk extraction and QEMU emulation output once Track 1 is built
 
 ---
 
 ## Project Context
 
-Built as part of the **Infotact Solutions Advanced Cybersecurity Engineering internship program.**
+Built as part of the Infotact Solutions Advanced Cybersecurity Engineering internship program.
 
-<div align="center">
-<sub>Domain: Reverse Engineering / IoT Security</sub>
-</div>
+## License
+
+TBD
