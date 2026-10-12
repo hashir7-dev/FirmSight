@@ -8,7 +8,6 @@ from core.extractor import process_firmware_pipeline
 
 
 class FileUploadModal(ModalScreen):
-    """iLovePDF-style Processing Modal for FirmSight."""
 
     CSS = """
     FileUploadModal {
@@ -146,7 +145,7 @@ class FirmSightApp(App):
                 yield Static("FILESYSTEM TREE", classes="pane-title")
                 yield Tree("firmware_root")
             with Vertical(id="network-pane"):
-                yield Static("NETWORK LOGS", classes="pane-title")
+                yield Static("NETWORK LOGS / INSPECTOR", classes="pane-title")
                 yield Log(id="network-log")
             with Vertical(id="status-pane"):
                 yield Static("EMULATION STATUS", classes="pane-title")
@@ -170,45 +169,92 @@ class FirmSightApp(App):
         log.write_line(f"[Pipeline] Ingesting target: {file_path} (Mode: {mode})")
         status.update(f"Status: Processing {os.path.basename(file_path)}...")
 
-        # Invoke core/extractor backend
         try:
             res = process_firmware_pipeline(file_path, action_mode=mode)
             if res.get("status") == "success":
                 log.write_line(f"[Extractor] {res.get('message')}")
                 status.update("Status: Extracted & Ready")
-                self.populate_tree("extracted")
+                
+                target_dir = "extracted"
+                for root, dirs, files in os.walk("extracted"):
+                    for d in dirs:
+                        if d.endswith("-root"):
+                            target_dir = os.path.join(root, d)
+                            break
+
+                self.populate_tree(target_dir)
+
             elif res.get("status") == "warning":
                 log.write_line(f"[WARNING] {res.get('message')}")
                 status.update("Status: Action Required (Encrypted)")
+                self.reset_tree_locked("[ENCRYPTED_PAYLOAD]")
+
             else:
                 log.write_line(f"[ERROR] {res.get('message')}")
                 status.update("Status: Extraction Failed")
+                self.reset_tree_locked("[EXTRACTION_FAILED]")
+
         except Exception as e:
             log.write_line(f"[ERROR] Failed to execute pipeline: {str(e)}")
             status.update("Status: Error")
+            self.reset_tree_locked("[ERROR]")
+
+    def reset_tree_locked(self, label_text: str) -> None:
+        tree = self.query_one(Tree)
+        tree.root.remove_children()
+        tree.root.label = label_text
 
     def populate_tree(self, root_dir: str) -> None:
         tree = self.query_one(Tree)
-        tree.root.clear()
-        tree.root.label = root_dir
+        tree.root.remove_children()
+        tree.root.label = os.path.basename(root_dir)
+        tree.root.data = root_dir
 
         if not os.path.exists(root_dir):
             return
 
         def add_node(path, parent_node):
             try:
-                for item in os.listdir(path):
+                for item in sorted(os.listdir(path)):
                     item_path = os.path.join(path, item)
                     if os.path.isdir(item_path):
-                        child = parent_node.add(item, expand=False)
+                        child = parent_node.add(item, data=item_path)
                         add_node(item_path, child)
                     else:
-                        parent_node.add_leaf(item)
+                        parent_node.add_leaf(item, data=item_path)
             except PermissionError:
                 pass
 
         add_node(root_dir, tree.root)
         tree.root.expand()
+
+    def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
+        """Triggered when you click or press Enter on any file or folder in the tree."""
+        node = event.node
+        file_path = node.data
+        log = self.query_one("#network-log", Log)
+        status = self.query_one("#status-text", Static)
+
+        if file_path and os.path.isfile(file_path):
+            try:
+                log.write_line(f"\n=== [Inspector] Opening: {os.path.basename(file_path)} ===")
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                
+                lines = content.splitlines()
+                if not lines:
+                    log.write_line("(File is empty)")
+                else:
+                    for line in lines[:25]:  # Print first 25 lines
+                        log.write_line(line)
+                    if len(lines) > 25:
+                        log.write_line(f"... [Truncated: {len(lines) - 25} more lines] ...")
+                
+                status.update(f"Status: Inspected {os.path.basename(file_path)}")
+            except Exception as e:
+                log.write_line(f"[Inspector Error] Could not read file: {e}")
+        elif file_path and os.path.isdir(file_path):
+            log.write_line(f"[Directory selected]: {file_path}")
 
     def on_mount(self) -> None:
         log = self.query_one("#network-log", Log)
